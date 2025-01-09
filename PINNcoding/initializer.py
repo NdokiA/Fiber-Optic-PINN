@@ -19,8 +19,8 @@ class initData:
             tx (array_like): Inirialized collocation point
         """        
         self.tx_train['col_point'] = tx
-        self.u_train['col_point'] = tf.zeros_like(tx)
-        self.v_train['col_point'] = tf.zeros_like(tx)
+        self.u_train['col_point'] = tf.zeros((tx.shape[0],1))
+        self.v_train['col_point'] = tf.zeros((tx.shape[0],1))
     
     def add_labelled_data(self, tx, u, v, label):
         """
