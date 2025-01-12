@@ -7,8 +7,8 @@ class nlseGradient(tf.keras.layers.Layer):
         tf (tf.keras.model): keras model
     """    
     def __init__(self, model: tf.keras.Model):
-        super(nlseGradient, self).__init__()
-        self.model = model
+        super(nlseGradient, self).__init__()    
+        self.model = model    
     
     @tf.function
     def call(self, tx: tf.Tensor) -> tf.Tensor:
@@ -45,3 +45,19 @@ class nlseGradient(tf.keras.layers.Layer):
         
         del tape1, tape2
         return ((u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2))
+    
+    def compute_residue(self, tx: tf.Tensor, gamma: float, beta: float, alpha: float):
+        (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call(tx)
+        scalar = u**2+v**2
+        u_residue = du_dx + alpha/2*u - beta/2*d2v_dt2 + gamma*scalar*v
+        v_residue = dv_dx + alpha/2*v + beta/2*d2u_dt2 - gamma*scalar*u
+        
+        return u_residue, v_residue
+    
+    def compute_labelled_data(self, tx_label: tf.Tensor):
+        uv = self.model(tx_label) #compute pulse eq. u(t,x)
+        u_label = tf.reshape(uv[..., 0], (-1, 1))
+        v_label = tf.reshape(uv[..., 1], (-1, 1)) 
+        
+        return u_label, v_label
+            
