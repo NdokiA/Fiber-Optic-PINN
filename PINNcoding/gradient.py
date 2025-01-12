@@ -13,38 +13,30 @@ class nlseGradient(tf.keras.layers.Layer):
     @tf.function
     def call(self, tx: tf.Tensor) -> tf.Tensor:
         """
-        Compute the derivative of input tensor 
-
-        Args:
-            tx (tf.Tensor): Compute 1st and 2nd derivatives of h(t,x)
-            using Jacobian Matrix
-        Outpus:
-            (u), (v)
-        """        
-        with tf.GradientTape(persistent=True) as tape1:
-            tape1.watch(tx) 
-            with tf.GradientTape(persistent=True) as tape2:
+        Compute the derivative of input tensor
+        """
+        with tf.GradientTape() as tape1:
+            tape1.watch(tx)
+            with tf.GradientTape() as tape2:
                 tape2.watch(tx)
-                uv = self.model(tx) #compute pulse eq. u(t,x)
-                u = tf.reshape(uv[..., 0], (-1, 1))
-                v = tf.reshape(uv[..., 1], (-1, 1)) 
+                uv = self.model(tx)
+                
+            duv_dtx = tape2.batch_jacobian(uv, tx, experimental_use_pfor=True)
             
-            du_dtx = tape2.batch_jacobian(u, tx)
-            du_dt = du_dtx[..., 0]
-            du_dx = du_dtx[..., 1]
-            
-            dv_dtx = tape2.batch_jacobian(v, tx)
-            dv_dt = dv_dtx[..., 0]
-            dv_dx = dv_dtx[..., 1]
-        
-        d2u_dt2 = tape1.batch_jacobian(du_dt, tx)[...,0]
-        d2u_dx2 = tape1.batch_jacobian(du_dx, tx)[...,1]
-        
-        d2v_dt2 = tape1.batch_jacobian(dv_dt, tx)[...,0]
-        d2v_dx2 = tape1.batch_jacobian(dv_dx, tx)[...,1]
-        
-        del tape1, tape2
+        d2uv_dtx2 = tape1.batch_jacobian(duv_dtx, tx, experimental_use_pfor=True)
+        d2uv_dtx2 = tf.reshape(d2uv_dtx2, (tf.shape(d2uv_dtx2)[0],2,4))
+
+        # Split the results into u and v
+        u, v = [tf.cast(t, tf.float32) for t in tf.split(uv, num_or_size_splits=2, axis=-1)]
+        du_dt, du_dx = [tf.cast(t, tf.float32) for t in tf.split(duv_dtx[..., 0], num_or_size_splits=2, axis=-1)]
+        dv_dt, dv_dx = [tf.cast(t, tf.float32) for t in tf.split(duv_dtx[..., 1], num_or_size_splits=2, axis=-1)]
+        d2u_dt2,_, _, d2u_dx2 = [tf.cast(t, tf.float32) for t in tf.split(d2uv_dtx2[:, 0], num_or_size_splits=4, axis=-1)]
+        d2v_dt2, _, _, d2v_dx2 = [tf.cast(t, tf.float32) for t in tf.split(d2uv_dtx2[:, 1], num_or_size_splits=4, axis=-1)]
+
+
         return ((u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2))
+
+
     
     def compute_residue(self, tx: tf.Tensor, gamma: float, beta: float, alpha: float):
         (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call(tx)
