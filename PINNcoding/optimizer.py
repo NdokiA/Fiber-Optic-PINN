@@ -8,7 +8,7 @@ class pinnOptimizer(nlseGradient):
     '''
     
     def __init__(self, model, batched_dict, alpha, beta2, gamma):
-        super().__init__()
+        super().__init__(model)
         self.model = model
         self.optimizer = tfp.optimizer.lbfgs_minimize
         
@@ -28,18 +28,22 @@ class pinnOptimizer(nlseGradient):
         u_residue, v_residue = self.compute_residue(collocation_batch[0], 
                                 self.gamma, self.beta2, self.alpha)
         
-        loss_u = tf.keras.losses.MSE(u_residue, collocation_batch[1])
-        loss_v = tf.keras.losses.MSE(v_residue, collocation_batch[2])
-        return loss_u+loss_v
+        loss_u = tf.reduce_mean(tf.keras.losses.MSE(u_residue, collocation_batch[1]), axis = 0)
+        loss_v = tf.reduce_mean(tf.keras.losses.MSE(v_residue, collocation_batch[2]), axis = 0)
+        total_loss = tf.cast(loss_u + loss_v, tf.float32)
+        return total_loss
 
-    def _compute_labelled_loss(self, all_labelled_batch):
-        loss_u, loss_v = 0, 0
-        for labelled_batch in all_labelled_batch:
-            u_label, v_label = self.compute_labelled_data(labelled_batch[0])
+    def _compute_labelled_loss(self, one_labelled_batch):
         
-            loss_u += tf.keras.losses.MSE(u_label, labelled_batch[1])
-            loss_v += tf.keras.losses.MSE(v_label, labelled_batch[2])
+        tx_label = tf.concat([batch[0] for batch in one_labelled_batch], axis = 0)
+        u_label = tf.concat([batch[1] for batch in one_labelled_batch], axis = 0)
+        v_label = tf.concat([batch[2] for batch in one_labelled_batch], axis = 0)
         
+        computed_u, computed_v = self.compute_labelled_data(tx_label)
+        
+        loss_u = tf.reduce_mean(tf.keras.losses.MSE(computed_u, u_label))
+        loss_v = tf.reduce_mean(tf.keras.losses.MSE(computed_v, v_label))
+        total_loss = tf.cast(loss_u + loss_v, tf.float32)
         return loss_u+loss_v
 
     def _compute_loss_gradient(self, collocation_batch, labelled_batch):        
