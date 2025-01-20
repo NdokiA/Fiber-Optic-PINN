@@ -24,7 +24,17 @@ class pinnOptimizer(nlseGradient):
         self.residue_losses = []
         self.labelled_losses = []
     
-    def _compute_residue_loss(self, collocation_batch):
+    def _compute_residue_loss(self, collocation_batch) -> tf.Tensor:
+        """_
+        Compute the residue loss of a batch of collocation point
+
+        Args:
+            collocation_batch (tuple(EagerTensor)): one batch of collocation point contains:
+            (col_point(tx), u(expected real residue), v(expected imaginary residue))
+
+        Returns:
+            tf.Tensor: scalar tensor of the total residue loss of real and imaginary part
+        """        
         
         u_residue, v_residue = self.compute_residue(collocation_batch[0], 
                                 self.gamma, self.beta2, self.alpha)
@@ -34,8 +44,19 @@ class pinnOptimizer(nlseGradient):
         total_loss = tf.cast(loss_u + loss_v, tf.float32)
         return total_loss
 
-    def _compute_labelled_loss(self, one_labelled_batch):
+    def _compute_labelled_loss(self, one_labelled_batch) -> tf.Tensor:
+        """
+        Compute labelled loss of a batch of labelled data
+
+        Args:
+            one_labelled_batch (tuple(EagerTensor)): one batch of labelled data contains:
+            (tx, u(expected real value), v(expected imaginary value))
+
+        Returns:
+            tf.Tensor: scalar tensor of total loss of real and imaginary part of labelled data
+        """        
         
+        #Tiga proses di bawah perlu diubah ke global untuk seluruh batch labelled data daripada lokal, kelamaan.
         tx_label = tf.concat([batch[0] for batch in one_labelled_batch], axis = 0)
         u_label = tf.concat([batch[1] for batch in one_labelled_batch], axis = 0)
         v_label = tf.concat([batch[2] for batch in one_labelled_batch], axis = 0)
@@ -47,20 +68,45 @@ class pinnOptimizer(nlseGradient):
         total_loss = tf.cast(loss_u + loss_v, tf.float32)
         return total_loss
 
-    def _compute_gradient(self, current_residue_loss, current_labelled_loss):        
+
+    def _compute_gradient(self, collocation_batch, one_labelled_batch) -> tuple:        
+        """
+
+        Args:
+            collocation_batch (tuple(EagerTensor)): one batch of collocation point data
+            one_labelled_batch (tuple(EagerTensor)): one batch of labelled point data
+
+        Returns:
+            current_residue_loss, current_labelled_loss, total_loss, flattened_gradients
+        """        
         with tf.GradientTape() as tape:
+            current_residue_loss = self._compute_residue_loss(collocation_batch)
+            current_labelled_loss = self._compute_labelled_loss(one_labelled_batch)
             total_loss = current_residue_loss+current_labelled_loss
         
         grads = tape.gradient(total_loss, self.model.trainable_variables)
         flattened_gradients = tf.concat([tf.reshape(g, [-1]) for g in grads], axis=0)
-        return total_loss, flattened_gradients 
+        return current_residue_loss, current_labelled_loss, total_loss, flattened_gradients 
     
-    def optimize_single_batch(self, collocation_batch, labelled_batch):
-        current_residue_loss = self._compute_residue_loss(collocation_batch)
-        current_labelled_loss = self._compute_labelled_loss(labelled_batch)
+    
+    def optimize_single_batch(self, collocation_batch, labelled_batch) -> tuple[tf.Tensor]:
+        """
+        Optimize single batch via tensorflow probability's optimizer LBFGS-minimze.
+
+        Args:
+            collocation_batch (tuple(EagerTensor)): one batch of collocation point data
+            one_labelled_batch (tuple(EagerTensor)): one batch of labelled point data
+
+        Returns:
+            tuple[tf.Tensor]: current_residue_loss, current_labelled_loss
+        """    
+            
+        current_residue_loss, current_labelled_loss, total_loss, gradients = self._compute_gradient(collocation_batch, labelled_batch)
+        initial_position = tf.concat([tf.reshape(v,[-1]) for v in self.model.trainable_variables], axis = 0)
+        
         results = self.optimizer(
-            value_and_gradients_function = self._compute_gradient(current_residue_loss, current_labelled_loss),
-            initial_position = tf.concat([tf.reshape(v,[-1]) for v in self.model.trainable_variables], axis = 0)
+            value_and_gradients_function = lambda initial_position : (total_loss, gradients),
+            initial_position = initial_position,
         )
         
         optimized_vars = tf.split(results.position, [tf.size(v) for v in self.model.trainable_variables])
@@ -71,7 +117,13 @@ class pinnOptimizer(nlseGradient):
         return current_residue_loss, current_labelled_loss
 
     def fit(self, epochs):
-        for epoch in epochs:
+        """
+        Optimize the model for each epoch
+
+        Args:
+            epochs (int): number of epoch/iteration.
+        """        
+        for epoch in range(epochs):
             epoch_residue_loss = 0
             epoch_labelled_loss = 0
             
