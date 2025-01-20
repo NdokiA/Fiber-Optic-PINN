@@ -6,12 +6,11 @@ class nlseGradient(tf.keras.layers.Layer):
     Args:
         tf (tf.keras.model): keras model
     """    
-    def __init__(self, model: tf.keras.Model):
-        super(nlseGradient, self).__init__()    
-        self.model = model    
+    def __init__(self):
+        super(nlseGradient, self).__init__()     
     
     @tf.function
-    def call(self, tx: tf.Tensor) -> tf.Tensor:
+    def call_grads(self, tx: tf.Tensor, model) -> tf.Tensor:
         """
         Compute the derivative of input tensor
         """
@@ -19,7 +18,7 @@ class nlseGradient(tf.keras.layers.Layer):
             tape1.watch(tx)
             with tf.GradientTape() as tape2:
                 tape2.watch(tx)
-                uv = self.model(tx)
+                uv = model(tx)
                 
             duv_dtx = tape2.batch_jacobian(uv, tx, experimental_use_pfor=True)
             
@@ -38,16 +37,16 @@ class nlseGradient(tf.keras.layers.Layer):
 
 
     
-    def compute_residue(self, tx: tf.Tensor, gamma: float, beta: float, alpha: float):
-        (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call(tx)
+    def compute_residue(self, tx: tf.Tensor, model, gamma: float, beta: float, alpha: float):
+        (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call_grads(tx, model)
         scalar = u**2+v**2
         u_residue = du_dx + alpha/2*u - beta/2*d2v_dt2 + gamma*scalar*v
         v_residue = dv_dx + alpha/2*v + beta/2*d2u_dt2 - gamma*scalar*u
         
         return u_residue, v_residue
     
-    def compute_labelled_data(self, tx_label: tf.Tensor):
-        uv = self.model(tx_label) #compute pulse eq. u(t,x)
+    def compute_labelled_data(self, tx_label: tf.Tensor, model):
+        uv = model(tx_label) #compute pulse eq. u(t,x)
         u_label = tf.reshape(uv[..., 0], (-1, 1))
         v_label = tf.reshape(uv[..., 1], (-1, 1)) 
         

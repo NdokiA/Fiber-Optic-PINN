@@ -9,7 +9,7 @@ class pinnOptimizer(nlseGradient):
     '''
     
     def __init__(self, model, batched_dict, alpha, beta2, gamma):
-        super().__init__(model)
+        super().__init__()
         self.model = model
         self.optimizer = tfp.optimizer.lbfgs_minimize
         
@@ -36,7 +36,7 @@ class pinnOptimizer(nlseGradient):
             tf.Tensor: scalar tensor of the total residue loss of real and imaginary part
         """        
         
-        u_residue, v_residue = self.compute_residue(collocation_batch[0], 
+        u_residue, v_residue = self.compute_residue(collocation_batch[0], self.model,
                                 self.gamma, self.beta2, self.alpha)
         
         loss_u = tf.reduce_mean(tf.keras.losses.MSE(u_residue, collocation_batch[1]), axis = 0)
@@ -61,7 +61,7 @@ class pinnOptimizer(nlseGradient):
         u_label = tf.concat([batch[1] for batch in one_labelled_batch], axis = 0)
         v_label = tf.concat([batch[2] for batch in one_labelled_batch], axis = 0)
         
-        computed_u, computed_v = self.compute_labelled_data(tx_label)
+        computed_u, computed_v = self.compute_labelled_data(tx_label, self.model)
         
         loss_u = tf.reduce_mean(tf.keras.losses.MSE(computed_u, u_label))
         loss_v = tf.reduce_mean(tf.keras.losses.MSE(computed_v, v_label))
@@ -127,11 +127,13 @@ class pinnOptimizer(nlseGradient):
             epoch_residue_loss = 0
             epoch_labelled_loss = 0
             
+            collocation_iterator = iter(self.collocation_data)
+            labelled_iterator = iter(self.labelled_data)
             print(f"Epoch {epoch+1}/{epochs}")
             progress_bar = tqdm(range(len(self.labelled_data)), desc="Training Batches", unit="batch")
             for _ in progress_bar:
-                collocation_batch = next(iter(self.collocation_data))
-                labelled_batch = next(iter(self.labelled_data))
+                collocation_batch = next(collocation_iterator)
+                labelled_batch = next(labelled_iterator)
                 
                 batch_residue_loss, batch_labelled_loss = self.optimize_single_batch(collocation_batch, labelled_batch)
                 progress_bar.set_description(f"Total Loss: {batch_residue_loss+batch_labelled_loss:.4f}")
