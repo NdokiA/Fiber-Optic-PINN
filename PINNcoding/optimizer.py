@@ -86,8 +86,21 @@ class pinnOptimizer(nlseGradient):
         
         grads = tape.gradient(total_loss, self.model.trainable_variables)
         flattened_gradients = tf.concat([tf.reshape(g, [-1]) for g in grads], axis=0)
-        return current_residue_loss, current_labelled_loss, total_loss, flattened_gradients 
+        return total_loss, flattened_gradients 
     
+    def assign_model_parameters(self, position):
+        """
+        Assign the flattened position vector back to the model's trainable variables.
+
+        Args:
+            position (tf.Tensor): flattened tensor of model parameters.
+        """
+        # Unflatten the parameters and assign back to the model variables
+        model_vars = tf.split(position, [tf.size(v) for v in self.model.trainable_variables])
+        
+        for var, opt_var in zip(self.model.trainable_variables, model_vars):
+            var.assign(tf.reshape(opt_var, var.shape))
+        
     
     def optimize_single_batch(self, collocation_batch, labelled_batch) -> tuple[tf.Tensor]:
         """
@@ -101,19 +114,27 @@ class pinnOptimizer(nlseGradient):
             tuple[tf.Tensor]: current_residue_loss, current_labelled_loss
         """    
             
-        current_residue_loss, current_labelled_loss, total_loss, gradients = self._compute_gradient(collocation_batch, labelled_batch)
+        current_labelled_loss = self._compute_labelled_loss(labelled_batch)
+        current_residue_loss = self._compute_residue_loss(collocation_batch)
+        
         initial_position = tf.concat([tf.reshape(v,[-1]) for v in self.model.trainable_variables], axis = 0)
         
+        def value_and_gradients_function(position):
+        # Assign position to the model variables
+            self.assign_model_parameters(position)
+            
+            # Compute the total loss again with updated model parameters
+            total_loss, gradients = self._compute_gradient(collocation_batch, labelled_batch)
+            
+            return total_loss, gradients
+        
+        
         results = self.optimizer(
-            value_and_gradients_function = lambda initial_position : (total_loss, gradients),
+            value_and_gradients_function = value_and_gradients_function,
             initial_position = initial_position,
         )
         
-        optimized_vars = tf.split(results.position, [tf.size(v) for v in self.model.trainable_variables])
-        
-        for var, opt_var in zip(self.model.trainable_variables, optimized_vars):
-            var.assign(tf.reshape(opt_var, var.shape))
-        
+        self.assign_model_parameters(results.position)
         return current_residue_loss, current_labelled_loss
 
     def fit(self, epochs):
