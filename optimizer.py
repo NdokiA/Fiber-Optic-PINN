@@ -36,12 +36,12 @@ class pinnOptimizer(nlseGradient):
             tf.Tensor: scalar tensor of the total residue loss of real and imaginary part
         """        
         
-        u_residue, v_residue = self.compute_residue(collocation_batch[0], self.model,
+        u_residue, v_residue, correction = self.compute_residue(collocation_batch[0], self.model,
                                 self.gamma, self.beta2, self.alpha)
         
         loss_u = tf.reduce_mean(tf.keras.losses.MSE(u_residue, collocation_batch[1]), axis = 0)
         loss_v = tf.reduce_mean(tf.keras.losses.MSE(v_residue, collocation_batch[2]), axis = 0)
-        total_loss = tf.cast(loss_u + loss_v, tf.float32)
+        total_loss = tf.cast(loss_u + loss_v + correction, tf.float32)
         return total_loss
 
     def _compute_labelled_loss(self, one_labelled_batch) -> tf.Tensor:

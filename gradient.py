@@ -43,7 +43,14 @@ class nlseGradient(tf.keras.layers.Layer):
         u_residue = du_dx + alpha/2*u - beta/2*d2v_dt2 + gamma*scalar*v
         v_residue = dv_dx + alpha/2*v + beta/2*d2u_dt2 - gamma*scalar*u
         
-        return u_residue, v_residue
+        correction = self.regularizers(du_dt, du_dx, dv_dt, dv_dx)
+        return u_residue, v_residue, correction
+    
+    def regularizers(self, **kwargs):
+        values = tf.convert_to_tensor([tf.reduce_max(value**2) for key, value in kwargs.items()])
+        regularizers = tf.reduce_sum(values)
+        
+        return regularizers
     
     def compute_labelled_data(self, tx_label: tf.Tensor, model):
         uv = model(tx_label) #compute pulse eq. u(t,x)
