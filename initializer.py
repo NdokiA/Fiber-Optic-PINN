@@ -38,7 +38,7 @@ class initData:
             n (int): Number of samples
             seed (int, optional): Random seed. Defaults to None.
         '''
-        d = final.shape[1]
+        d = final.shape[-1] if isinstance(final, np.ndarray) else 1
         col_points = self.lhs_sampling(n,d,seed)*(final-initial) + initial
         return col_points
     

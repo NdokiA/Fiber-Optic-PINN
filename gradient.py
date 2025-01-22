@@ -35,7 +35,6 @@ class nlseGradient(tf.keras.layers.Layer):
 
         return ((u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2))
 
-
     
     def compute_residue(self, tx: tf.Tensor, model, gamma: float, beta: float, alpha: float, with_penalty: bool = True):
         (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call_grads(tx, model)
@@ -46,8 +45,8 @@ class nlseGradient(tf.keras.layers.Layer):
         correction = self.penalties(du_dt, du_dx, dv_dt, dv_dx) if with_penalty else 0
         return u_residue, v_residue, correction
     
-    def penalties(self, **kwargs):
-        values = tf.convert_to_tensor([tf.reduce_max(value**2) for key, value in kwargs.items()])
+    def penalties(self, *args):
+        values = tf.convert_to_tensor([tf.reduce_max(value**2) for value in args])
         regularizers = tf.reduce_sum(values)
         
         return regularizers
