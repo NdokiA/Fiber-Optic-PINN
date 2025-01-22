@@ -3,7 +3,48 @@ import numpy as np
 
 class initData:
     '''
-    Initialize Dataset
+    initData class is used to initialize the collocation points and labelled data using random LHS sampling
+    '''
+    def __init__(self):
+        pass 
+
+    def lhs_sampling(self, n: int, d: int, seed: int = None) -> np.ndarray:
+        """
+        Latin Hypercube Sampling (LHS) to generate random points
+
+        Args:
+            n (int): Number of samples
+            d (int): Dimension of samples
+            seed (int, optional): Random seed. Defaults to None
+
+        Returns:
+            np.ndarray: Random samples
+        """        
+        rng = np.random.default_rng(seed)
+        result = np.zeros((n,d))
+
+        for i in range(d):
+            result[:,i] = rng.permutation(np.linspace(0,1,n,endpoint=False)) + rng.random((n))/n
+        
+        return result
+    
+    def init_points(self, final: np.ndarray, initial: np.ndarray, n: int, seed: int = None) -> np.ndarray:
+        '''
+        Initialize points using Latin Hypercube Sampling
+        
+        Args:
+            final (np.ndarray): Expected final point (have to have the same dimension with initial)
+            initial (np.ndarray): Expected initial point (have to have the same dimension with final)
+            n (int): Number of samples
+            seed (int, optional): Random seed. Defaults to None.
+        '''
+        d = final.shape[1]
+        col_points = self.lhs_sampling(n,d,seed)*(final-initial) + initial
+        return col_points
+    
+class batchData:
+    '''
+    batchData class is used to store collocation and labelled data and batch for training purposes
     '''
     def __init__(self):
         self.tx_train = {}
