@@ -1,4 +1,5 @@
 import tensorflow as tf
+from itertools import cycle
 import tensorflow_probability as tfp
 from tqdm import tqdm
 from gradient import nlseGradient
@@ -8,7 +9,7 @@ class pinnOptimizer(nlseGradient):
     Algorithm for processing input and do backpropagation
     '''
     
-    def __init__(self, model, batched_dict, alpha, beta2, gamma):
+    def __init__(self, model, batched_dict, alpha, beta2, gamma, penalty = True):
         super().__init__()
         self.model = model
         self.optimizer = tfp.optimizer.lbfgs_minimize
@@ -20,6 +21,8 @@ class pinnOptimizer(nlseGradient):
         self.alpha = alpha
         self.beta2 = beta2
         self.gamma = gamma 
+
+        self.penalty = penalty
         
         self.residue_losses = []
         self.labelled_losses = []
@@ -37,7 +40,7 @@ class pinnOptimizer(nlseGradient):
         """        
         
         u_residue, v_residue, correction = self.compute_residue(collocation_batch[0], self.model,
-                                self.gamma, self.beta2, self.alpha)
+                                self.gamma, self.beta2, self.alpha, self.penalty)
         
         loss_u = tf.reduce_mean(tf.keras.losses.MSE(u_residue, collocation_batch[1]), axis = 0)
         loss_v = tf.reduce_mean(tf.keras.losses.MSE(v_residue, collocation_batch[2]), axis = 0)
@@ -149,9 +152,11 @@ class pinnOptimizer(nlseGradient):
             epoch_labelled_loss = 0
             
             collocation_iterator = iter(self.collocation_data)
-            labelled_iterator = iter(self.labelled_data)
+            labelled_iterator = cycle(self.labelled_data)
             print(f"Epoch {epoch+1}/{epochs}")
-            progress_bar = tqdm(range(len(self.labelled_data)), desc="Training Batches", unit="batch")
+
+            progress_bar = tqdm(range(len(self.collocation_data)), desc="Training Batches", unit="batch")
+            
             for _ in progress_bar:
                 collocation_batch = next(collocation_iterator)
                 labelled_batch = next(labelled_iterator)
