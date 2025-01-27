@@ -36,18 +36,18 @@ class nlseGradient(tf.keras.layers.Layer):
         return ((u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2))
 
     
-    def compute_residue(self, tx: tf.Tensor, model, gamma: float, beta: float, alpha: float, with_penalty: bool = True):
+    def compute_residue(self, tx: tf.Tensor, model, T: float, L: float, gamma: float, beta: float, alpha: float, penalty_factor: float):
         (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call_grads(tx, model)
         scalar = u**2+v**2
-        u_residue = du_dx + alpha/2*u - beta/2*d2v_dt2 + gamma*scalar*v
-        v_residue = dv_dx + alpha/2*v + beta/2*d2u_dt2 - gamma*scalar*u
+        u_residue = du_dx/L + alpha/2*u - beta*d2v_dt2/(2*T**2) + gamma*scalar*v
+        v_residue = dv_dx/L + alpha/2*v + beta*d2u_dt2/(2*T**2) - gamma*scalar*u
         
-        correction = self.penalties(du_dt, du_dx, dv_dt, dv_dx) if with_penalty else 0
+        correction = self.penalties(penalty_factor, du_dt, du_dx, dv_dt, dv_dx)
         return u_residue, v_residue, correction
     
-    def penalties(self, *args):
+    def penalties(self,penalty_factor, *args):
         values = tf.convert_to_tensor([tf.reduce_max(value**2) for value in args])
-        regularizers = tf.reduce_sum(values)
+        regularizers = penalty_factor*tf.reduce_sum(values)
         
         return regularizers
     
