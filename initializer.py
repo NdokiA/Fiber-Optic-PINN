@@ -28,7 +28,7 @@ class initData:
         
         return result
     
-    def init_points(self, final: np.ndarray, initial: np.ndarray, n: int, seed: int = None) -> np.ndarray:
+    def init_points(self, final: np.ndarray, start: np.ndarray, n: int, seed: int = None) -> np.ndarray:
         '''
         Initialize points using Latin Hypercube Sampling
         
@@ -39,17 +39,35 @@ class initData:
             seed (int, optional): Random seed. Defaults to None.
         '''
         d = final.shape[-1] if isinstance(final, np.ndarray) else 1
-        col_points = self.lhs_sampling(n,d,seed)*(final-initial) + initial
+        col_points = self.lhs_sampling(n,d,seed)*(final-start) + start
         return col_points
+    
+    def normalize_points(self, points: np.ndarray, final:np.ndarray, start:np.ndarray) -> np.ndarray:
+        '''
+        Normalize points using the initial and final point
+        
+        Args:
+            points (np.ndarray): Points to be normalized
+            final (np.ndarray): Expected final point (have to have the same dimension with initial)
+            initial (np.ndarray): Expected initial point (have to have the same dimension with final)
+        '''
+        return (points - start)/(final - start)
     
 class batchData:
     '''
     batchData class is used to store collocation and labelled data and batch for training purposes
     '''
     def __init__(self):
-        self.tx_train = {}
-        self.u_train = {}
-        self.v_train = {}
+        self.tx_train = {
+            'col_point': None,
+        }
+        self.u_train = {
+            'col_point': None,
+            
+        }
+        self.v_train = {
+            'col_point': None,
+        }
     
     def add_collocation_point(self,tx):
         """
@@ -84,7 +102,7 @@ class batchData:
             list: List of keys
         """        
         return list(self.tx_train.keys())
-    
+        
     def batch_data(self, batch_size = 100) -> dict:
         """
         Batch x_train and y_train (input data)
@@ -98,15 +116,19 @@ class batchData:
         batched_data = {}
         common_keys = self.get_keys()
         
-        tx_train = self.tx_train
-        u_train = self.u_train
-        v_train = self.v_train
-        
-        for key in common_keys:
-            dataset = tf.data.Dataset.from_tensor_slices((tx_train[key], u_train[key], v_train[key]))
-            batched_dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        labelled_keys = list(set(common_keys) - set(['col_point']))
+        tx_labelled = np.concatenate([self.tx_train[key] for key in labelled_keys], axis = 0)
+        u_labelled = np.concatenate([self.u_train[key] for key in labelled_keys], axis = 0)
+        v_labelled = np.concatenate([self.v_train[key] for key in labelled_keys], axis = 0)
             
-            batched_data[key] = batched_dataset
+        collocation_data = tf.data.Dataset.from_tensor_slices((self.tx_train['col_point'], self.u_train['col_point'], 
+                                                               self.v_train['col_point']))
+        labelled_data = tf.data.Dataset.from_tensor_slices((tx_labelled, u_labelled, v_labelled))
+        
+        collocation_data = collocation_data.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        labelled_data = labelled_data.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        batched_data['col_point'] = collocation_data
+        batched_data['labelled_data'] = labelled_data
         
         return batched_data
 
