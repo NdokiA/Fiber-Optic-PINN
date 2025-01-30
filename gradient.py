@@ -6,11 +6,16 @@ class nlseGradient(tf.keras.layers.Layer):
     Args:
         tf (tf.keras.model): keras model
     """    
-    def __init__(self):
+    def __init__(self, model, T, L, alpha, beta, gamma):
         super(nlseGradient, self).__init__()     
+        self.model = model
+        self.T = T 
+        self. L = L
+        self.gamma = gamma 
+        self.beta = beta 
+        self.alpha = alpha
     
-    @tf.function
-    def call_grads(self, tx: tf.Tensor, model) -> tf.Tensor:
+    def call_grads(self, tx: tf.Tensor) -> tf.Tensor:
         """
         Compute the derivative of input tensor
         """
@@ -18,11 +23,11 @@ class nlseGradient(tf.keras.layers.Layer):
             tape1.watch(tx)
             with tf.GradientTape() as tape2:
                 tape2.watch(tx)
-                uv = model(tx)
+                uv = self.model(tx)
                 
-            duv_dtx = tape2.batch_jacobian(uv, tx, experimental_use_pfor=True)
+            duv_dtx = tape2.batch_jacobian(uv, tx, experimental_use_pfor = True)
             
-        d2uv_dtx2 = tape1.batch_jacobian(duv_dtx, tx, experimental_use_pfor=True)
+        d2uv_dtx2 = tape1.batch_jacobian(duv_dtx, tx, experimental_use_pfor = True)
         d2uv_dtx2 = tf.reshape(d2uv_dtx2, (tf.shape(d2uv_dtx2)[0],2,4))
 
         # Split the results into u and v
@@ -35,24 +40,18 @@ class nlseGradient(tf.keras.layers.Layer):
 
         return ((u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2))
 
-    
-    def compute_residue(self, tx: tf.Tensor, model, T: float, L: float, gamma: float, beta: float, alpha: float, penalty_factor: float):
-        (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call_grads(tx, model)
+    @tf.function
+    def compute_residue(self, tx: tf.Tensor):
+        (u, du_dt, du_dx, d2u_dt2, d2u_dx2), (v, dv_dt, dv_dx, d2v_dt2, d2v_dx2) = self.call_grads(tx)
         scalar = u**2+v**2
-        u_residue = du_dx/L + alpha/2*u - beta*d2v_dt2/(2*T**2) + gamma*scalar*v
-        v_residue = dv_dx/L + alpha/2*v + beta*d2u_dt2/(2*T**2) - gamma*scalar*u
-        
-        correction = self.penalties(penalty_factor, du_dt, du_dx, dv_dt, dv_dx)
-        return u_residue, v_residue, correction
+        u_residue = du_dx/self.L + self.alpha/2*u - self.beta*d2v_dt2/(2*self.T**2) + self.gamma*scalar*v
+        v_residue = dv_dx/self.L + self.alpha/2*v + self.beta*d2u_dt2/(2*self.T**2) - self.gamma*scalar*u
+
+        return u_residue, v_residue
     
-    def penalties(self,penalty_factor, *args):
-        values = tf.convert_to_tensor([tf.reduce_max(value**2) for value in args])
-        regularizers = penalty_factor*tf.reduce_sum(values)
-        
-        return regularizers
     
-    def compute_labelled_data(self, tx_label: tf.Tensor, model):
-        uv = model(tx_label) #compute pulse eq. u(t,x)
+    def compute_labelled_data(self, tx_label: tf.Tensor):
+        uv = self.model(tx_label) #compute pulse eq. u(t,x)
         u_label = tf.reshape(uv[..., 0], (-1, 1))
         v_label = tf.reshape(uv[..., 1], (-1, 1)) 
         

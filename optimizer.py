@@ -9,8 +9,8 @@ class pinnOptimizer(nlseGradient):
     Algorithm for processing input and do backpropagation
     '''
     
-    def __init__(self, model, batched_dict ,T, L, alpha, beta2, gamma, penalty):
-        super().__init__()
+    def __init__(self, model, batched_dict ,T, L, alpha, beta2, gamma):
+        super().__init__(model, T, L, alpha, beta2, gamma)
         self.model = model
         self.optimizer = tfp.optimizer.lbfgs_minimize
         
@@ -23,8 +23,6 @@ class pinnOptimizer(nlseGradient):
         
         self.T = T 
         self.L = L
-
-        self.penalty = penalty
         
         self.residue_losses = []
         self.labelled_losses = []
@@ -41,15 +39,12 @@ class pinnOptimizer(nlseGradient):
             tf.Tensor: scalar tensor of the total residue loss of real and imaginary part
         """        
         
-        u_residue, v_residue, correction = self.compute_residue(
-                                                    collocation_batch[0], self.model,
-                                                    self.T, self.L,
-                                                    self.gamma, self.beta2, self.alpha, self.penalty
-                                                    )
+        u_residue, v_residue = self.compute_residue(
+                                                    collocation_batch[0])
         
         loss_u = tf.reduce_mean(tf.keras.losses.MSE(u_residue, collocation_batch[1]), axis = 0)
         loss_v = tf.reduce_mean(tf.keras.losses.MSE(v_residue, collocation_batch[2]), axis = 0)
-        total_loss = tf.cast(loss_u + loss_v + correction, tf.float32)
+        total_loss = tf.cast(loss_u + loss_v, tf.float32)
         return total_loss
 
     def _compute_labelled_loss(self, labelled_batch) -> tf.Tensor:
@@ -64,7 +59,7 @@ class pinnOptimizer(nlseGradient):
             tf.Tensor: scalar tensor of total loss of real and imaginary part of labelled data
         """        
     
-        computed_u, computed_v = self.compute_labelled_data(labelled_batch[0], self.model)
+        computed_u, computed_v = self.compute_labelled_data(labelled_batch[0])
         
         loss_u = tf.reduce_mean(tf.keras.losses.MSE(computed_u, labelled_batch[1]))
         loss_v = tf.reduce_mean(tf.keras.losses.MSE(computed_v, labelled_batch[2]))
