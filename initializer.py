@@ -42,17 +42,6 @@ class initData:
         col_points = self.lhs_sampling(n,d,seed)*(final-start) + start
         return col_points
     
-    def normalize_points(self, points: np.ndarray, final:np.ndarray, start:np.ndarray) -> np.ndarray:
-        '''
-        Normalize points using the initial and final point
-        
-        Args:
-            points (np.ndarray): Points to be normalized
-            final (np.ndarray): Expected final point (have to have the same dimension with initial)
-            initial (np.ndarray): Expected initial point (have to have the same dimension with final)
-        '''
-        return (points - start)/(final - start)
-    
 class batchData:
     '''
     batchData class is used to store collocation and labelled data and batch for training purposes
