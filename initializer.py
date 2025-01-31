@@ -50,11 +50,7 @@ class batchData:
         self.tx_train = {
             'col_point': None,
         }
-        self.u_train = {
-            'col_point': None,
-            
-        }
-        self.v_train = {
+        self.uv_train = {
             'col_point': None,
         }
     
@@ -67,8 +63,7 @@ class batchData:
             tx (array_like): Inirialized collocation point
         """        
         self.tx_train['col_point'] = tx
-        self.u_train['col_point'] = tf.zeros((tx.shape[0],1))
-        self.v_train['col_point'] = tf.zeros((tx.shape[0],1))
+        self.uv_train['col_point'] = tf.zeros((tx.shape[0],2))
     
     def add_labelled_data(self, tx, u, v, label):
         """
@@ -80,8 +75,8 @@ class batchData:
             v (array_like): imaginary part of labelled data
         """        
         self.tx_train[label] = tx
-        self.u_train[label] = u
-        self.v_train[label] = v
+        self.uv_train[label] = tf.concat([u,v], axis = -1)
+        
    
     def get_keys(self)->list:
         """
@@ -107,12 +102,17 @@ class batchData:
         
         labelled_keys = list(set(common_keys) - set(['col_point']))
         tx_labelled = np.concatenate([self.tx_train[key] for key in labelled_keys], axis = 0)
-        u_labelled = np.concatenate([self.u_train[key] for key in labelled_keys], axis = 0)
-        v_labelled = np.concatenate([self.v_train[key] for key in labelled_keys], axis = 0)
-            
-        collocation_data = tf.data.Dataset.from_tensor_slices((self.tx_train['col_point'], self.u_train['col_point'], 
-                                                               self.v_train['col_point']))
-        labelled_data = tf.data.Dataset.from_tensor_slices((tx_labelled, u_labelled, v_labelled))
+        uv_labelled = np.concatenate([self.uv_train[key] for key in labelled_keys], axis = 0)
+        
+        collocation_data = tf.data.Dataset.from_tensor_slices((
+            tf.cast(self.tx_train['col_point'], tf.float32), 
+            tf.cast(self.uv_train['col_point'], tf.float32)
+        ))
+
+        labelled_data = tf.data.Dataset.from_tensor_slices((
+            tf.cast(tx_labelled, tf.float32), 
+            tf.cast(uv_labelled, tf.float32)
+        ))
         
         collocation_data = collocation_data.batch(batch_size).prefetch(tf.data.AUTOTUNE)
         labelled_data = labelled_data.batch(batch_size).prefetch(tf.data.AUTOTUNE)
