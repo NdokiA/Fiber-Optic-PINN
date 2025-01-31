@@ -39,13 +39,11 @@ class pinnOptimizer(nlseGradient):
             tf.Tensor: scalar tensor of the total residue loss of real and imaginary part
         """        
         
-        u_residue, v_residue = self.compute_residue(
-                                                    collocation_batch[0])
+        uv_residue = self.compute_residue(collocation_batch[0])
         
-        loss_u = tf.reduce_mean(tf.keras.losses.MSE(u_residue, collocation_batch[1]), axis = 0)
-        loss_v = tf.reduce_mean(tf.keras.losses.MSE(v_residue, collocation_batch[2]), axis = 0)
-        total_loss = tf.cast(loss_u + loss_v, tf.float32)
-        return total_loss
+        losses = tf.reduce_mean(tf.keras.losses.MSE(uv_residue, collocation_batch[1]))
+        losses = tf.cast(losses, tf.float32)
+        return losses
 
     def _compute_labelled_loss(self, labelled_batch) -> tf.Tensor:
         """
@@ -59,12 +57,11 @@ class pinnOptimizer(nlseGradient):
             tf.Tensor: scalar tensor of total loss of real and imaginary part of labelled data
         """        
     
-        computed_u, computed_v = self.compute_labelled_data(labelled_batch[0])
+        uv = self.compute_labelled_data(labelled_batch[0])
         
-        loss_u = tf.reduce_mean(tf.keras.losses.MSE(computed_u, labelled_batch[1]))
-        loss_v = tf.reduce_mean(tf.keras.losses.MSE(computed_v, labelled_batch[2]))
-        total_loss = tf.cast(loss_u + loss_v, tf.float32)
-        return total_loss
+        losses = tf.reduce_mean(tf.keras.losses.MSE(uv, labelled_batch[1]))
+        losses = tf.cast(losses, tf.float32)
+        return losses
 
 
     def _compute_gradient(self, batch, is_residue) -> tuple:        
