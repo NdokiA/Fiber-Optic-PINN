@@ -1,21 +1,28 @@
 import tensorflow as tf
-from itertools import cycle
+
 import tensorflow_probability as tfp
 from tqdm import tqdm
-from gradient import nlseGradient
+from pinnPack.gradient import nlseGradient
+
+import time as Time
+from functools import wraps
+
 
 class pinnOptimizer(nlseGradient):
     '''
     Algorithm for processing input and do backpropagation
     '''
     
-    def __init__(self, model, batched_dict ,T, L, alpha, beta2, gamma):
+    def __init__(self, model, collocation_data, labelled_data ,
+                 T, L, alpha, beta2, gamma):
         super().__init__(model, T, L, alpha, beta2, gamma)
         self.model = model
-        self.optimizer = tfp.optimizer.lbfgs_minimize
         
-        self.labelled_data = batched_dict['labelled_data']
-        self.collocation_data = batched_dict['col_point']
+        self.ADAM = tf.optimizers.Adam(learning_rate = 1e-3, jit_compile=False)
+        self.LBFGS = tfp.optimizer.lbfgs_minimize
+        
+        self.labelled_data = labelled_data
+        self.collocation_data = collocation_data
         
         self.alpha = alpha
         self.beta2 = beta2
@@ -24,91 +31,53 @@ class pinnOptimizer(nlseGradient):
         self.T = T 
         self.L = L
         
-        self.residue_losses = []
-        self.labelled_losses = []
+        self.loss_records = []
+        self.time_records = []
     
-    def _compute_residue_loss(self, collocation_batch) -> tf.Tensor:
-        """_
-        Compute the residue loss of a batch of collocation point
-
-        Args:
-            collocation_batch (tuple(EagerTensor)): one batch of collocation point contains:
-            (col_point(tx), u(expected real residue), v(expected imaginary residue))
-
-        Returns:
-            tf.Tensor: scalar tensor of the total residue loss of real and imaginary part
-        """        
+    def _loss_fn(self, collocation_data, labelled_data) -> tf.Tensor:
         
-        uv_residue = self.compute_residue(collocation_batch[0])
+        uv_residue = self.compute_residue(collocation_data[0])
+        uv_data = self.compute_labelled_data(labelled_data[0])
         
-        losses = tf.reduce_mean(tf.keras.losses.MSE(uv_residue, collocation_batch[1]))
-        losses = tf.cast(losses, tf.float32)
+        residual_loss = tf.reduce_mean(tf.keras.losses.MSE(uv_residue, collocation_data[1]))
+        data_loss = tf.reduce_mean(tf.keras.losses.MSE(uv_data, labelled_data[1]))
+                                             
+        losses = tf.cast(residual_loss + data_loss, tf.float32)
         return losses
 
-    def _compute_labelled_loss(self, labelled_batch) -> tf.Tensor:
-        """
-        Compute labelled loss of a batch of labelled data
-
-        Args:
-            one_labelled_batch (tuple(EagerTensor)): one batch of labelled data contains:
-            (tx, u(expected real value), v(expected imaginary value))
-
-        Returns:
-            tf.Tensor: scalar tensor of total loss of real and imaginary part of labelled data
-        """        
-    
-        uv = self.compute_labelled_data(labelled_batch[0])
-        
-        losses = tf.reduce_mean(tf.keras.losses.MSE(uv, labelled_batch[1]))
-        losses = tf.cast(losses, tf.float32)
-        return losses
-
-
-    def _compute_gradient(self, batch, is_residue) -> tuple:        
-        """
-
-        Args:
-            batch: one batch of data
-            is_residue: check whether to use residue or labelled loss
-
-        Returns:
-            loss, flattened gradients
-        """        
-        func = self._compute_residue_loss if is_residue else self._compute_labelled_loss
+    def _gradient(self, collocation_data, labelled_data) -> tuple:        
         with tf.GradientTape() as tape:
-            loss = func(batch)
+            loss = self._loss_fn(collocation_data, labelled_data)
         
         grads = tape.gradient(loss, self.model.trainable_variables)
         flattened_gradients = tf.concat([tf.reshape(g, [-1]) for g in grads], axis=0)
         return loss, flattened_gradients 
     
+    @tf.function
     def assign_model_parameters(self, position):
-        """
-        Assign the flattened position vector back to the model's trainable variables.
-
-        Args:
-            position (tf.Tensor): flattened tensor of model parameters.
-        """
+        
+        #Compute sizes of trainable variables
+        sizes = tf.convert_to_tensor([tf.size(v) for v in self.model.trainable_variables])
+        
         # Unflatten the parameters and assign back to the model variables
-        model_vars = tf.split(position, [tf.size(v) for v in self.model.trainable_variables])
+        model_vars = tf.split(position, sizes)
         
         for var, opt_var in zip(self.model.trainable_variables, model_vars):
             var.assign(tf.reshape(opt_var, var.shape))
+
+    def optimize_adam(self, collocation_data, labelled_data) -> float: 
         
+        with tf.GradientTape() as tape:
+            loss = self._loss_fn(collocation_data, labelled_data)
     
-    def optimize_single_batch(self, batch, is_residue) -> tuple[tf.Tensor]:
-        """
-        Optimize single batch via tensorflow probability's optimizer LBFGS-minimze.
+        gradients = tape.gradient(loss, self.model.trainable_variables)
+        self.ADAM.apply_gradients(zip(gradients, self.model.trainable_variables))
 
-        Args:
-            batch: one batch of data
-            is_residue: check whether to use residue or labelled loss
-
-        Returns:
-            current_loss
-        """    
+        return loss
+    
+    def optimize_lbfgs(self, collocation_data, labelled_data) -> float:
             
-        loss = self._compute_residue_loss(batch) if is_residue else self._compute_labelled_loss(batch)
+        loss = self._loss_fn(collocation_data, labelled_data)
         
         initial_position = tf.concat([tf.reshape(v,[-1]) for v in self.model.trainable_variables], axis = 0)
         
@@ -117,53 +86,50 @@ class pinnOptimizer(nlseGradient):
             self.assign_model_parameters(position)
             
             # Compute the total loss again with updated model parameters
-            total_loss, gradients = self._compute_gradient(batch, is_residue)
+            loss, gradients = self._gradient(collocation_data, labelled_data)
             
-            return total_loss, gradients
+            return loss, gradients
         
         
-        results = self.optimizer(
+        results = self.LBFGS(
             value_and_gradients_function = value_and_gradients_function,
             initial_position = initial_position,
+            tolerance = 1e-5,
+            max_iterations = 20,
         )
         
         self.assign_model_parameters(results.position)
         return loss
 
-    def fit(self, epochs):
+    def fit(self, adam_epochs, bfgs_epochs):
         """
         Optimize the model for each epoch
 
         Args:
             epochs (int): number of epoch/iteration.
         """        
-        for epoch in range(epochs):
-            epoch_residue_loss = 0
-            epoch_labelled_loss = 0
+        adam_bar = tqdm(range(adam_epochs), desc='Adam_Epochs', unit='epoch')
+        bfgs_bar = tqdm(range(bfgs_epochs), desc='LBFGS_Epochs', unit='epoch')
+        total_time = 0
+        
+        print('Processing using ADAM Optimalization strategies')
+        for epoch in adam_bar:
+            start = Time.time()
+            loss = self.optimize_adam(self.collocation_data, self.labelled_data)
+            stop = Time.time()
             
-            collocation_iterator = iter(self.collocation_data)
-            labelled_iterator = iter(self.labelled_data)
-            print(f"Epoch {epoch+1}/{epochs}")
-
-            collocation_bar = tqdm(range(len(self.collocation_data)), desc="Training Batches", unit="batch")
-            labelled_bar = tqdm(range(len(self.labelled_data)), desc="Labelled Batches", unit="batch")
+            adam_bar.set_postfix(loss=f"{loss:.4e}")
+            total_time += (stop-start)
+            self.time_records.append(total_time)            
+            self.loss_records.append(loss)
+        
+        print('Processing using L-BFGS Optimalization strategies')
+        for epoch in bfgs_bar:
+            start = Time.time()
+            loss = self.optimize_lbfgs(self.collocation_data, self.labelled_data)
+            stop = Time.time()
             
-            for _ in collocation_bar:
-                collocation_batch = next(collocation_iterator)
-                residue_loss = self.optimize_single_batch(collocation_batch, is_residue = True)
-                collocation_bar.set_description(f"Residue Loss: {residue_loss:.4e}")
-                epoch_residue_loss += residue_loss
-                
-            for _ in labelled_bar:
-                labelled_batch = next(labelled_iterator)
-                labelled_loss = self.optimize_single_batch(labelled_batch, is_residue = False)
-                labelled_bar.set_description(f"Labelled Loss: {labelled_loss:.4e}")
-                epoch_labelled_loss += labelled_loss
-            
-            
-            epoch_residue_loss /= len(self.collocation_data)
-            epoch_labelled_loss /= len(self.labelled_data)
-            
-            print(f'Residue Loss : {epoch_residue_loss:.4f}; Labelled Loss : {epoch_labelled_loss:.4f}')
-            self.residue_losses.append(epoch_residue_loss)
-            self.labelled_losses.append(epoch_labelled_loss)
+            bfgs_bar.set_postfix(loss=f"{loss:.4e}")
+            total_time += (stop-start)
+            self.time_records.append(total_time)  
+            self.loss_records.append(loss)
