@@ -51,8 +51,8 @@ class genData:
         """        
         
         dataset = (
-            tf.convert_to_tensor(tx_data, dtype=tf.float32),
-            tf.convert_to_tensor(uv_data, dtype=tf.float32)
+            tf.cast(tx_data, dtype=tf.float32),
+            tf.cast(uv_data, dtype=tf.float32)
         )
 
         return dataset
