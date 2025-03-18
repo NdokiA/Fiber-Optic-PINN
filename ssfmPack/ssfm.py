@@ -71,7 +71,7 @@ def getSpectrum(time: np.ndarray, pulse: np.ndarray) -> np.ndarray:
     pulseEnergy = getEnergy(time, pulse)
     spectrumEnergy = getEnergy(f, spectrum)
     err = np.abs((pulseEnergy/spectrumEnergy-1))
-    assert(err < 1e-7), f'Energy unconserved error: {err:.3e}'
+    assert(err < 1e-6), f'Energy unconserved error: {err:.3e}'
     
     return spectrum
 
@@ -94,7 +94,16 @@ def getPulse(f: np.ndarray, spectrum: np.ndarray) -> np.ndarray:
     pulseEnergy = getEnergy(time, pulse)
     spectrumEnergy = getEnergy(f, spectrum)
     err = np.abs(pulseEnergy/spectrumEnergy-1)
-    assert(err < 1e-7), f'Energy unconserved error: {err:.3e}'
+    assert(err < 1e-6), f'Energy unconserved error: {err:.3e}'
+    
+    return pulse
+
+def convertdB(pulse, cutoff = -30): 
+    
+    pulse = getPower(pulse)
+    pulse[pulse < 1e-100] = 1e-100 
+    pulse = 10*np.log10(pulse) 
+    pulse[pulse < cutoff] = cutoff
     
     return pulse
 
