@@ -1,0 +1,18 @@
+{
+    "SSFM5-1": {
+        "runtime": "0.92",
+        "timesteps": "512",
+        "zteps": "4096",
+        "prop_length": "12867.96",
+        "clipped_dim": "(4096, 512)",
+        "error": "2.5771e-06"
+    },
+    "SSFM20-1": {
+        "runtime": "1.17",
+        "timesteps": "1024",
+        "zteps": "4096",
+        "prop_length": "51471.85",
+        "clipped_dim": "(4096, 1024)",
+        "error": "9.2094e-04"
+    }
+}
