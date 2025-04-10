@@ -1,12 +1,7 @@
-import tensorflow as tf 
+import torch
+import torch.nn as nn
 
-class physicsNetwork:
-  '''
-  Build PINN model for the heat equation
-  '''
-  @classmethod
-  def build(cls, num_inputs = 2, layers = [32,32,32,32,32],
-            activation = 'tanh', num_outputs = 2):
+class physicsNetwork(nn.Module):
     '''
     Build PINN model for the heat equation with input shape (t,x)
     output shape u(t,x)
@@ -18,12 +13,29 @@ class physicsNetwork:
     Outputs:
       keras model
     '''
-    inputs = tf.keras.layers.Input(shape = (num_inputs,))
-    #hidden layers
-    x = inputs
-    for layer in layers:
-      x = tf.keras.layers.Dense(layer, activation = activation)(x)
-    #output layer
-    outputs = tf.keras.layers.Dense(num_outputs)(x)
-    model = tf.keras.models.Model(inputs = inputs, outputs = outputs)
-    return model
+    
+    def __init__(self, num_inputs = 2, layers = [32,32,32,32,32],
+            activation = 'tanh', num_outputs = 2, seed = 42):
+        super(physicsNetwork, self).__init__()
+        torch.manual_seed(seed) 
+        
+        act_fn = {
+            'tanh': nn.Tanh(),
+            'relu': nn.ReLU(),
+            'sigmoid': nn.Sigmoid(),
+            'swish': nn.SiLU()
+        }.get(activation.lower(), nn.Tanh())
+        
+        #Building Network 
+        layer_dims = [num_inputs] + layers + [num_outputs] 
+        self.layers = nn.ModuleList() 
+        self.activation = act_fn
+        
+        for i in range(len(layer_dims)-1): 
+            self.layers.append(nn.Linear(layer_dims[i], layer_dims[i+1]))
+    
+    def forward(self, x):
+        for layer in self.layers[:-1]:
+            x = self.activation(layer(x)) 
+        return self.layers[-1](x)
+    
