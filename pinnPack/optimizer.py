@@ -1,29 +1,17 @@
-import tensorflow as tf
-
-import tensorflow_probability as tfp
-from tqdm import tqdm
+import torch
+import torch.nn.functional as F
 import time as Time
-
-from pinnPack.gradient import nlseGradient
-from ssfmPack import ssfm
-
-
-class pinnOptimizer(nlseGradient):
+    
+class pinnOptimizer():
     '''
     Algorithm for processing input and do backpropagation
     '''
     
-    def __init__(self, model, collocation_data, labelled_data, validation_data,
+    def __init__(self, model, collocation_data, labelled_data,
                  T, L, alpha, beta2, gamma):
-        super().__init__(model, T, L, alpha, beta2, gamma)
         self.model = model
-        
-        self.ADAM = tf.optimizers.Adam(learning_rate = 5e-4, jit_compile=False)
-        self.LBFGS = tfp.optimizer.lbfgs_minimize
-        
         self.labelled_data = labelled_data
         self.collocation_data = collocation_data
-        self.validation_data = validation_data
         
         self.alpha = alpha
         self.beta2 = beta2
@@ -33,119 +21,97 @@ class pinnOptimizer(nlseGradient):
         self.L = L
         
         self.loss_records = []
-        self.time_records = []
-        self.validation_records = []
+        self.time_records = [0]
+        
+    def compute_residue(self, tx: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the residue of collocation points input
+        """
+        tx.requires_grad_(True) 
+        uv = self.model(tx) 
+        
+        vu = uv[:, [1,0]] 
+        
+        #First derivative 
+        duv_dtx = [] 
+        for i in range(uv.shape[1]):
+            grad = torch.autograd.grad(uv[:,i], tx, torch.ones_like(uv[:, i]), create_graph = True)[0]
+            duv_dtx.append(grad)
+        duv_dtx = torch.stack(duv_dtx, dim = -1)
+        
+        duv_dt = duv_dtx[:,0,:]
+        duv_dx = duv_dtx[:,1,:]
+        
+        #Second derivative
+        d2uv_dt2 = [] 
+        for i in range(duv_dt.shape[1]):
+            grad2 = torch.autograd.grad(duv_dt[:,i], tx, torch.ones_like(duv_dt[:, i]), create_graph = True)[0]
+            d2uv_dt2.append(grad2)
+        d2uv_dt2 = torch.stack(d2uv_dt2, dim = -1)[:,0,:]
+        
+        d2vu_dt2 = d2uv_dt2[:, [1,0]]
+        
+        scalar = torch.sum(uv**2, dim = 1, keepdim = True) 
+        scalar = torch.cat([scalar, scalar], dim = 1)
+        
+        residue = (duv_dx/self.L + self.alpha*uv/2 - 
+                   self.beta2/(2*self.T**2)*d2vu_dt2 +
+                   self.gamma*scalar*vu
+                  )
+        return residue 
     
-    def _loss_fn(self, collocation_data, labelled_data) -> float:
-        
-        uv_residue = self.compute_residue(collocation_data[0])
-        uv_data = self.compute_labelled_data(labelled_data[0])
-        
-        residual_loss = tf.reduce_mean(tf.keras.losses.MSE(uv_residue, collocation_data[1]))
-        data_loss = tf.reduce_mean(tf.keras.losses.MSE(uv_data, labelled_data[1]))
-                                             
-        losses = tf.cast(residual_loss + data_loss, tf.float32)
-        return losses
     
-    def _validation_fn(self, validation_data) -> float:
+    def training_fn(self, optimizer, use_closure = False) -> float:
+        self.model.train()
         
-        computed_uv = self.compute_residue(validation_data[0])
-        pulse = tf.reduce_sum(tf.square(computed_uv), axis = 1) 
-        
-        losses = tf.reduce_mean(tf.keras.losses.MSE(pulse, validation_data[1]))
-        return losses
-
-    def _gradient(self, collocation_data, labelled_data) -> tuple:        
-        with tf.GradientTape() as tape:
-            loss = self._loss_fn(collocation_data, labelled_data)
-        
-        grads = tape.gradient(loss, self.model.trainable_variables)
-        flattened_gradients = tf.concat([tf.reshape(g, [-1]) for g in grads], axis=0)
-        return loss, flattened_gradients 
-    
-    @tf.function
-    def assign_model_parameters(self, position):
-        
-        #Compute sizes of trainable variables
-        sizes = tf.convert_to_tensor([tf.size(v) for v in self.model.trainable_variables])
-        
-        # Unflatten the parameters and assign back to the model variables
-        model_vars = tf.split(position, sizes)
-        
-        for var, opt_var in zip(self.model.trainable_variables, model_vars):
-            var.assign(tf.reshape(opt_var, var.shape))
-
-    def optimize_adam(self, collocation_data, labelled_data) -> float: 
-        
-        with tf.GradientTape() as tape:
-            loss = self._loss_fn(collocation_data, labelled_data)
-    
-        gradients = tape.gradient(loss, self.model.trainable_variables)
-        self.ADAM.apply_gradients(zip(gradients, self.model.trainable_variables))
-
-        return loss
-    
-    def optimize_lbfgs(self, collocation_data, labelled_data) -> float:
+        def closure():
+            start = Time.time()
             
-        loss = self._loss_fn(collocation_data, labelled_data)
-        
-        initial_position = tf.concat([tf.reshape(v,[-1]) for v in self.model.trainable_variables], axis = 0)
-        
-        def value_and_gradients_function(position):
-        # Assign position to the model variables
-            self.assign_model_parameters(position)
-            
-            # Compute the total loss again with updated model parameters
-            loss, gradients = self._gradient(collocation_data, labelled_data)
-            
-            return loss, gradients
-        
-        
-        results = self.LBFGS(
-            value_and_gradients_function = value_and_gradients_function,
-            initial_position = initial_position,
-            tolerance = 1e-5,
-            max_iterations = 50,
-        )
-        
-        self.assign_model_parameters(results.position)
-        return loss
+            optimizer.zero_grad()
+            uv_residue = self.compute_residue(self.collocation_data[0])
+            uv_label = self.model(self.labelled_data[0])
 
-    def fit(self, adam_epochs, bfgs_epochs):
+            residue_loss = F.mse_loss(uv_residue, self.collocation_data[1], reduction = 'mean')
+            data_loss = F.mse_loss(uv_label, self.labelled_data[1], reduction = 'mean')
+            total_loss = residue_loss + data_loss
+            
+            total_loss.backward() 
+            stop = Time.time()
+            
+            interval = stop-start
+            self.loss_records.append(total_loss.item())
+            self.time_records.append(self.time_records[-1]+interval)
+            
+            return total_loss
+
+        
+        if use_closure:
+            loss = optimizer.step(closure)
+        else:
+            loss = closure() 
+            optimizer.step()
+            return loss
+    
+    def fit(self, adam_epochs, lbfgs_epochs):
+        ADAM = torch.optim.Adam(self.model.parameters(), lr = 1e-3)
+        LBFGS = torch.optim.LBFGS(self.model.parameters(), lr = 1.0,
+                                       max_iter = lbfgs_epochs, history_size = 50, 
+                                       line_search_fn = 'strong_wolfe')
+        
         """
         Optimize the model for each epoch
 
         Args:
             epochs (int): number of epoch/iteration.
         """        
-        adam_bar = tqdm(range(adam_epochs), desc='Adam_Epochs', unit='epoch')
-        bfgs_bar = tqdm(range(bfgs_epochs), desc='LBFGS_Epochs', unit='epoch')
         total_time = 0
-        
         print('Processing using ADAM Optimalization strategies')
-        for epoch in adam_bar:
-            start = Time.time()
-            loss = self.optimize_adam(self.collocation_data, self.labelled_data)
-            stop = Time.time()
+        for epoch in range(adam_epochs):
             
-            val_loss = self._validation_fn(self.validation_data)
-            adam_bar.set_postfix({"Training Loss": f"{loss:.4e}", "Validation Loss": f"{val_loss:.4e}"})
-            total_time += (stop-start)
+            loss = self.training_fn(ADAM, use_closure = False)
+            if (epoch+1)%10 == 0:
+                print(f"Training Loss: {self.loss_records[-1]:.4e} for Epoch {epoch+1}")
             
-            self.time_records.append(total_time)            
-            self.loss_records.append(loss)
-            self.validation_records.append(val_loss)
-        
         print('Processing using L-BFGS Optimalization strategies')
-        for epoch in bfgs_bar:
-            start = Time.time()
-            loss = self.optimize_lbfgs(self.collocation_data, self.labelled_data)
-            stop = Time.time()
-            
-            val_loss = self._validation_fn(self.validation_data)
-            bfgs_bar.set_postfix({"Training Loss": f"{loss:.4e}", "Validation Loss": f"{val_loss:.4e}"})
-            total_time += (stop-start)
-            
-            self.time_records.append(total_time)            
-            self.loss_records.append(loss)
-            self.validation_records.append(val_loss)
+        loss = self.training_fn(LBFGS, use_closure = True)      
+        print(f"Training Loss: {self.loss_records[-1]:.4e} for LBGFS Operation")
